@@ -3,7 +3,7 @@ import pickle
 import os
 import sys
 import time
-
+import matplotlib.pyplot as plt
 import gym
 from gym import wrappers
 import numpy as np
@@ -93,7 +93,7 @@ class RL_Trainer(object):
 
         agent_class = self.params['agent_class']
         self.agent = agent_class(self.env, self.params['agent_params'])
-
+        
     def run_training_loop(self, n_iter, collect_policy, eval_policy,
                           initial_expertdata=None, relabel_with_expert=False,
                           start_relabel_with_expert=1, expert_policy=None):
@@ -110,7 +110,7 @@ class RL_Trainer(object):
         # init vars at beginning of training
         self.total_envsteps = 0
         self.start_time = time.time()
-
+        avglist = []
         for itr in range(n_iter):
             print("\n\n********** Iteration %i ************"%itr)
 
@@ -144,20 +144,39 @@ class RL_Trainer(object):
             # log/save
             if self.logvideo or self.logmetrics:
                 # perform logging
-                print('\nBeginning logging procedure...')
-                self.perform_logging(itr, paths, eval_policy, train_video_paths, train_logs)
+                #print('\nBeginning logging procedure...')
+                avglist.append(self.perform_logging(itr, paths, eval_policy, train_video_paths, train_logs))
 
                 if self.params['save_params']:
                     self.agent.save('{}/agent_itr_{}.pt'.format(self.params['logdir'], itr))
+        print(avglist)
+        plt.plot(avglist)
+        return avglist
 
     ####################################
     ####################################
 
-    def collect_training_trajectories(self, itr, initial_expertdata, collect_policy, batch_size):
-        # TODO: GETTHIS from HW1
+    def collect_training_trajectories(self, itr, load_initial_expertdata, collect_policy, batch_size):
+        if itr == 0 and load_initial_expertdata:
+            file = open(load_initial_expertdata, 'rb')
+            loaded_paths = pickle.load(file)
+            return loaded_paths, 0, None
+
+        #print("\nCollecting data to be used for training...")
+        paths, envsteps_this_batch = utils.sample_trajectories(self.env,collect_policy,batch_size,self.params['ep_len'])
+
+        train_video_paths = None
+        return paths, envsteps_this_batch, train_video_paths
+
 
     def train_agent(self):
-        # TODO: GETTHIS from HW1
+        #print('\nTraining agent using sampled data from replay buffer...')
+        all_logs = []
+        for train_step in range(self.params['num_agent_train_steps_per_iter']):
+            ob_batch, ac_batch, re_batch, next_ob_batch, terminal_batch = self.agent.sample(self.params['train_batch_size'])
+            train_log = self.agent.train(ob_batch, ac_batch, re_batch, next_ob_batch, terminal_batch)
+            all_logs.append(train_log)
+        return all_logs
 
     ####################################
     ####################################
@@ -169,7 +188,7 @@ class RL_Trainer(object):
         #######################
 
         # collect eval trajectories, for logging
-        print("\nCollecting data for eval...")
+        #print("\nCollecting data for eval...")
         eval_paths, eval_envsteps_this_batch = utils.sample_trajectories(self.env, eval_policy, self.params['eval_batch_size'], self.params['ep_len'])
 
         # save eval rollouts as videos in tensorboard event file
@@ -220,8 +239,11 @@ class RL_Trainer(object):
 
             # perform the logging
             for key, value in logs.items():
-                print('{} : {}'.format(key, value))
+                #print('{} : {}'.format(key, value))
                 self.logger.log_scalar(value, key, itr)
-            print('Done logging...\n\n')
+            #print('Done logging...\n\n')
 
-            self.logger.flush()
+            #self.logger.flush()
+            
+
+            return logs['Eval_AverageReturn']
